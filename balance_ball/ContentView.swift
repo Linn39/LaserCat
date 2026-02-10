@@ -22,11 +22,12 @@ struct ContentView: View {
             ZStack {
                 // The "Floor"
                 Color.black.ignoresSafeArea()
-                
-                // The Marble
-                Circle()
-                    .fill(RadialGradient(colors: [.red, .black], center: .center, startRadius: 0, endRadius: 25))
-                    .frame(width: 50, height: 50)
+
+                // The Cat Face from asset catalog
+                Image("cat_face")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 60, height: 60)
                     .position(ballPosition)
                     .shadow(color: .white.opacity(0.3), radius: 10)
             }
