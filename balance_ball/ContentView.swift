@@ -9,8 +9,13 @@ import SwiftUI
 import CoreMotion
 
 struct ContentView: View {
+    enum MovementMode {
+        case easy   // old: move towards target position
+        case difficult // new: velocity-based
+    }
+
     // 1. Sensor & Position State
-    @State private var ballPosition = CGPoint(x: 200, y: 400)
+    @State private var catPosition = CGPoint(x: 200, y: 400)
     @State private var motion = CMMotionManager()
     @State private var marblePosition = CGPoint(x: 150, y: 300)
     @State private var marbleColor: Color = .red
@@ -18,6 +23,8 @@ struct ContentView: View {
     @State private var hitCount: Int = 0
     @State private var lastHitDate: Date? = nil
     @State private var totalHitInterval: TimeInterval = 0
+    @State private var movementMode: MovementMode? = nil
+    @State private var screenSize: CGSize = .zero
     
     // 2. Sensitivity Settings (Adjust these for your balance board!)
     let sensitivity: CGFloat = 50.0
@@ -28,90 +35,198 @@ struct ContentView: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                // The "Floor"
+                // Background
                 Color.black.ignoresSafeArea()
 
-                // The Marble (laser pointer)
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [marbleColor, .black],
-                            center: .center,
-                            startRadius: 0,
-                            endRadius: marbleRadius
-                        )
-                    )
-                    .frame(width: marbleRadius * 2, height: marbleRadius * 2)
-                    .position(marblePosition)
-                    .shadow(color: .white.opacity(0.3), radius: 8)
-
-                // The Cat Face from asset catalog
-                Image("cat_face")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: catSize, height: catSize)
-                    .position(ballPosition)
-                    .shadow(color: .white.opacity(0.3), radius: 10)
-
-                // Score HUD at bottom
-                VStack {
-                    Spacer()
-                    VStack(spacing: 4) {
-                        Text("Hits: \(hitCount)")
-                            .font(.headline)
+                if movementMode == nil {
+                    // Mode selection menu
+                    VStack(spacing: 24) {
+                        Text("Choose Mode")
+                            .font(.largeTitle.bold())
                             .foregroundColor(.white)
 
-                        Text("Avg time between hits: \(formattedAverageInterval())")
-                            .font(.subheadline)
+                        VStack(spacing: 16) {
+                            Button {
+                                selectMode(.easy, screenSize: geometry.size)
+                            } label: {
+                                Text("Easy Mode")
+                                    .font(.headline)
+                                    .foregroundColor(.black)
+                                    .padding(.horizontal, 32)
+                                    .padding(.vertical, 12)
+                                    .background(Color.white)
+                                    .cornerRadius(12)
+                            }
+
+                            Button {
+                                selectMode(.difficult, screenSize: geometry.size)
+                            } label: {
+                                Text("Difficult Mode")
+                                    .font(.headline)
+                                    .foregroundColor(.black)
+                                    .padding(.horizontal, 32)
+                                    .padding(.vertical, 12)
+                                    .background(Color.white)
+                                    .cornerRadius(12)
+                            }
+                        }
+
+                        Text("Easy: cat moves based on distance to target.\nDifficult: cat responds directly to tilt (more twitchy).")
+                            .font(.footnote)
                             .foregroundColor(.white.opacity(0.8))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 24)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color.black.opacity(0.5))
-                    .cornerRadius(12)
-                    .padding(.bottom, 24)
+                } else {
+                    // Game view
+                    VStack {
+                        // Top bar with back button
+                        HStack {
+                            Button {
+                                motion.stopDeviceMotionUpdates()
+                                movementMode = nil
+                            } label: {
+                                Text("Back")
+                                    .font(.headline)
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(Color.black.opacity(0.6))
+                                    .cornerRadius(8)
+                            }
+
+                            Spacer()
+                        }
+                        .padding([.top, .horizontal], 16)
+
+                        Spacer()
+
+                        // Game layer
+                        ZStack {
+                            // The Marble (laser pointer)
+                            Circle()
+                                .fill(
+                                    RadialGradient(
+                                        colors: [marbleColor, .black],
+                                        center: .center,
+                                        startRadius: 0,
+                                        endRadius: marbleRadius
+                                    )
+                                )
+                                .frame(width: marbleRadius * 2, height: marbleRadius * 2)
+                                .position(marblePosition)
+                                .shadow(color: .white.opacity(0.3), radius: 8)
+
+                            // The Cat Face from asset catalog
+                            Image("cat_face")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: catSize, height: catSize)
+                                .position(catPosition)
+                                .shadow(color: .white.opacity(0.3), radius: 10)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                        // Score HUD at bottom
+                        VStack(spacing: 4) {
+                            Text("Hits: \(hitCount)")
+                                .font(.headline)
+                                .foregroundColor(.white)
+
+                            Text("Avg time: \(formattedAverageInterval())")
+                                .font(.subheadline)
+                                .foregroundColor(.white.opacity(0.8))
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Color.black.opacity(0.5))
+                        .cornerRadius(12)
+                        .padding(.bottom, 24)
+                    }
                 }
             }
             .onAppear {
-                // Place the marble at a random starting position
-                marblePosition = randomMarblePosition(in: geometry.size)
-                startMotionUpdates(screenSize: geometry.size)
+                // Cache screen size for later use when selecting mode
+                screenSize = geometry.size
             }
         }
     }
+
+    // Called when the user picks Easy or Difficult mode from the menu
+    private func selectMode(_ mode: MovementMode, screenSize: CGSize) {
+        movementMode = mode
+        self.screenSize = screenSize
+
+        // Reset game state for the new session
+        catPosition = CGPoint(x: screenSize.width / 2, y: screenSize.height / 2)
+        marblePosition = randomMarblePosition(in: screenSize)
+        marbleColor = .red
+        isMarbleHit = false
+        hitCount = 0
+        lastHitDate = nil
+        totalHitInterval = 0
+
+        startMotionUpdates(screenSize: screenSize, mode: mode)
+    }
     
-    func startMotionUpdates(screenSize: CGSize) {
+    func startMotionUpdates(screenSize: CGSize, mode: MovementMode) {
         if motion.isDeviceMotionAvailable {
             motion.deviceMotionUpdateInterval = 1/60
             motion.startDeviceMotionUpdates(to: .main) { data, _ in
                 guard let attitude = data?.attitude else { return }
                 
-                // Calculate "Target" position based on tilt
-                // Pitch = Forward/Back, Roll = Left/Right
-                let targetX = (screenSize.width / 2) + (CGFloat(attitude.roll) * sensitivity * 10)
-                let targetY = (screenSize.height / 2) + (CGFloat(attitude.pitch) * sensitivity * 10)
-                
-                // 3. Applying Smoothing (Linear Interpolation)
-                // Instead of jumping to target, we move a small % towards it
-                withAnimation(.interactiveSpring()) {
-                    ballPosition.x += (targetX - ballPosition.x) * damping
-                    ballPosition.y += (targetY - ballPosition.y) * damping
+                switch mode {
+                case .easy:
+                    // Original behavior: move towards a target position based on tilt
+                    // Pitch = Forward/Back, Roll = Left/Right
+                    let targetX = (screenSize.width / 2) + (CGFloat(attitude.roll) * sensitivity * 10)
+                    let targetY = (screenSize.height / 2) + (CGFloat(attitude.pitch) * sensitivity * 10)
                     
-                    // Keep the ball on screen
-                    ballPosition.x = min(max(ballPosition.x, 25), screenSize.width - 25)
-                    ballPosition.y = min(max(ballPosition.y, 25), screenSize.height - 25)
-
-                    // Check proximity between cat and marble
-                    let dx = ballPosition.x - marblePosition.x
-                    let dy = ballPosition.y - marblePosition.y
-                    let distance = sqrt(dx * dx + dy * dy)
-
-                    // Threshold: roughly overlap of cat and marble circles
-                    let hitThreshold = (catSize / 2) + marbleRadius * 0.5
-
-                    if distance < hitThreshold && !isMarbleHit {
-                        handleMarbleHit(screenSize: screenSize)
+                    withAnimation(.interactiveSpring()) {
+                        catPosition.x += (targetX - catPosition.x) * damping
+                        catPosition.y += (targetY - catPosition.y) * damping
+                        
+                        // Keep the cat on screen (using a fixed margin similar to original)
+                        let margin: CGFloat = 25
+                        catPosition.x = min(max(catPosition.x, margin), screenSize.width - margin)
+                        catPosition.y = min(max(catPosition.y, margin), screenSize.height - margin)
                     }
+                    
+                case .difficult:
+                    // Velocity-based movement: more direct response to tilt
+                    // Pitch = Forward/Back, Roll = Left/Right
+                    let velocityX = CGFloat(attitude.roll) * sensitivity * 10
+                    let velocityY = CGFloat(attitude.pitch) * sensitivity * 10
+                    
+                    // Apply damping to velocity for smooth movement
+                    let dampedVelocityX = velocityX * damping
+                    let dampedVelocityY = velocityY * damping
+                    
+                    // Calculate new position based on velocity
+                    let newX = catPosition.x + dampedVelocityX
+                    let newY = catPosition.y + dampedVelocityY
+                    
+                    // Keep the cat on screen (clamp after movement calculation)
+                    let margin = catSize / 2
+                    let clampedX = min(max(newX, margin), screenSize.width - margin)
+                    let clampedY = min(max(newY, margin), screenSize.height - margin)
+                    
+                    withAnimation(.interactiveSpring()) {
+                        catPosition.x = clampedX
+                        catPosition.y = clampedY
+                    }
+                }
+
+                // Check proximity between cat and marble
+                let dx = catPosition.x - marblePosition.x
+                let dy = catPosition.y - marblePosition.y
+                let distance = sqrt(dx * dx + dy * dy)
+
+                // Threshold: roughly overlap of cat and marble circles
+                let hitThreshold = (catSize / 2) + marbleRadius * 0.5
+
+                if distance < hitThreshold && !isMarbleHit {
+                    handleMarbleHit(screenSize: screenSize)
                 }
             }
         }
