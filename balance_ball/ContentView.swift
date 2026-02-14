@@ -7,6 +7,7 @@
 
 import SwiftUI
 import CoreMotion
+import AVFoundation
 
 struct ContentView: View {
     enum MovementMode {
@@ -25,6 +26,7 @@ struct ContentView: View {
     @State private var totalHitInterval: TimeInterval = 0
     @State private var movementMode: MovementMode? = nil
     @State private var screenSize: CGSize = .zero
+    @State private var catchSoundPlayer: AVAudioPlayer?
     
     // 2. Sensitivity Settings (Adjust these for your balance board!)
     let sensitivity: CGFloat = 50.0
@@ -148,6 +150,12 @@ struct ContentView: View {
             .onAppear {
                 // Cache screen size for later use when selecting mode
                 screenSize = geometry.size
+                
+                // Load sound effect
+                if let url = Bundle.main.url(forResource: "mixkit-short-laser-gun-shot-1670", withExtension: "wav") {
+                    catchSoundPlayer = try? AVAudioPlayer(contentsOf: url)
+                    catchSoundPlayer?.prepareToPlay()
+                }
             }
         }
     }
@@ -237,6 +245,8 @@ struct ContentView: View {
     private func handleMarbleHit(screenSize: CGSize) {
         isMarbleHit = true
         marbleColor = .green
+        catchSoundPlayer?.currentTime = 0  //sound starts from 0 again
+        catchSoundPlayer?.play()
 
         // Update score and timing
         let now = Date()
