@@ -8,6 +8,9 @@
 import SwiftUI
 import CoreMotion
 import AVFoundation
+#if os(iOS)
+import UIKit
+#endif
 
 struct ContentView: View {
     enum MovementMode {
@@ -28,13 +31,20 @@ struct ContentView: View {
     @State private var screenSize: CGSize = .zero
     @State private var catchSoundPlayer: AVAudioPlayer?
     @State private var soundEnabled: Bool = true
+    @State private var lastSignificantMovementDate: Date? = nil
+    #if os(iOS)
+    @State private var idleTimer: Timer?
+    #endif
     
     // 2. Sensitivity Settings (Adjust these for your balance board!)
     let sensitivity: CGFloat = 50.0
     let damping: CGFloat = 0.15 // Lower = smoother/slower, Higher = twitchier
     let laserRadius: CGFloat = 25.0
     let catSize: CGFloat = 60.0
-    
+
+    /// Idle timer: gyro magnitude (rad/s) above this = "significant movement". Still device ≈ 0; moving the board gives 0.1–1+.
+    let movementThresholdGyro: Double = 0.05
+
     var body: some View {
         GeometryReader { geometry in
             ZStack {
@@ -103,6 +113,12 @@ struct ContentView: View {
                             Button {
                                 motion.stopDeviceMotionUpdates()
                                 movementMode = nil
+                                // Allow screen to lock again when leaving the game
+                                #if os(iOS)
+                                idleTimer?.invalidate()
+                                idleTimer = nil
+                                UIApplication.shared.isIdleTimerDisabled = false
+                                #endif
                             } label: {
                                 Text("Back")
                                     .font(.headline)
@@ -192,8 +208,15 @@ struct ContentView: View {
         hitCount = 0
         lastHitDate = nil
         totalHitInterval = 0
+        lastSignificantMovementDate = Date()
 
         startMotionUpdates(screenSize: screenSize, mode: mode)
+
+        // Keep screen on while the game is active; let a timer manage it based on movement
+        #if os(iOS)
+        startIdleTimer()
+        UIApplication.shared.isIdleTimerDisabled = true
+        #endif
     }
     
     func startMotionUpdates(screenSize: CGSize, mode: MovementMode) {
@@ -201,7 +224,7 @@ struct ContentView: View {
             motion.deviceMotionUpdateInterval = 1/60
             motion.startDeviceMotionUpdates(to: .main) { data, _ in
                 guard let attitude = data?.attitude else { return }
-                
+
                 switch mode {
                 case .easy:
                     // Move towards a target position based on tilt
@@ -245,6 +268,16 @@ struct ContentView: View {
                     }
                 }
 
+                // Track significant movement by gyro (rotation rate), not tilt — phone can be tilted but still
+                #if os(iOS)
+                if let rot = data?.rotationRate {
+                    let gyroMagnitude = sqrt(rot.x * rot.x + rot.y * rot.y + rot.z * rot.z)
+                    if gyroMagnitude > movementThresholdGyro {
+                        lastSignificantMovementDate = Date()
+                    }
+                }
+                #endif
+
                 // Check proximity between cat and laser
                 let dx = catPosition.x - laserPosition.x
                 let dy = catPosition.y - laserPosition.y
@@ -259,6 +292,29 @@ struct ContentView: View {
             }
         }
     }
+
+    #if os(iOS)
+    // Start the timer that manages the idle timer (screen lock) based on movement
+    // This timer is separate from the motion update timer to avoid conflicts
+    private func startIdleTimer() {
+        idleTimer?.invalidate()
+        idleTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            guard movementMode != nil else {
+                UIApplication.shared.isIdleTimerDisabled = false
+                return
+            }
+
+            let now = Date()
+            if let lastMove = lastSignificantMovementDate,
+               now.timeIntervalSince(lastMove) <= 10 {
+                UIApplication.shared.isIdleTimerDisabled = true
+            } else {
+                UIApplication.shared.isIdleTimerDisabled = false
+            }
+        }
+        RunLoop.main.add(idleTimer!, forMode: .common)
+    }
+    #endif
 
     // When the cat reaches the laser: flash green, then teleport
     private func handleLaserHit(screenSize: CGSize) {
