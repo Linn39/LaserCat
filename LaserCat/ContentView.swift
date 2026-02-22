@@ -34,6 +34,7 @@ struct ContentView: View {
     @State private var lastSignificantMovementDate: Date? = nil
     #if os(iOS)
     @State private var idleTimer: Timer?
+    @AppStorage(OrientationPreference.useLandscapeKey) private var preferredOrientationIsLandscape = false
     #endif
     
     // 2. Sensitivity Settings (Adjust these for your balance board!)
@@ -54,15 +55,27 @@ struct ContentView: View {
                 if movementMode == nil {
                     // Start page
                     VStack(spacing: 24) {
-                        // Sound settings
+                        // Top bar: rotation lock and sound
                         HStack {
                             Spacer()
+                            #if os(iOS)
+                            Button {
+                                preferredOrientationIsLandscape.toggle()
+                                OrientationPreference.setLandscape(preferredOrientationIsLandscape)
+                                applyPreferredOrientation()
+                            } label: {
+                                Image(systemName: "rotate.right")
+                                    .font(.title)
+                                    .foregroundColor(.white)
+                            }
+                            Spacer()
+                            #endif
                             Button {
                                 soundEnabled.toggle()
                                 configureAudioSession()
                             } label: {
                                 Image(systemName: soundEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                                    .font(.title) //icon size
+                                    .font(.title)
                                     .foregroundColor(.white)
                             }
                             Spacer()
@@ -191,8 +204,51 @@ struct ContentView: View {
                     catchSoundPlayer = try? AVAudioPlayer(contentsOf: url)
                     catchSoundPlayer?.prepareToPlay()
                 }
+                #if os(iOS)
+                // Apply user's chosen orientation so start screen appears in the right orientation
+                applyPreferredOrientation()
+                #endif
+            }
+            .onChange(of: geometry.size) { _, newSize in
+                // Keep screen size in sync with device rotation so movement bounds stay correct
+                screenSize = newSize
             }
         }
+    }
+
+    #if os(iOS)
+    /// Applies the user-chosen orientation so the start screen and game use it. Call when the start screen appears and when the user taps the rotation button.
+    private func applyPreferredOrientation() {
+        let orientations: UIInterfaceOrientationMask = OrientationPreference.mask
+        // Notify the system to re-query supported orientations (from AppDelegate) so rotation can take effect.
+        if let windowScene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first,
+           let window = windowScene.windows.first(where: { $0.isKeyWindow }),
+           let rootVC = window.rootViewController {
+            rootVC.setNeedsUpdateOfSupportedInterfaceOrientations()
+        }
+        if #available(iOS 16.0, *) {
+            for scene in UIApplication.shared.connectedScenes {
+                guard let windowScene = scene as? UIWindowScene else { continue }
+                windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: orientations))
+            }
+        }
+    }
+    #endif
+
+    /// Map attitude to screen X/Y using the chosen orientation only (portrait or landscape right).
+    private func tiltForScreen(from attitude: CMAttitude) -> (x: CGFloat, y: CGFloat) {
+        let roll = CGFloat(attitude.roll)
+        let pitch = CGFloat(attitude.pitch)
+        #if os(iOS)
+        if OrientationPreference.isLandscape {
+            // Landscape right: device is rotated 90° CW; screen X = forward tilt (pitch), screen Y = side tilt (roll).
+            return (x: pitch, y: roll*(-1))
+        }
+        #endif
+        // Portrait: roll = left/right → X, pitch = forward/back → Y.
+        return (x: roll, y: pitch)
     }
 
     // Called when the user picks Easy or Difficult mode from the menu
@@ -225,13 +281,14 @@ struct ContentView: View {
             motion.startDeviceMotionUpdates(to: .main) { data, _ in
                 guard let attitude = data?.attitude else { return }
 
+                let tilt = tiltForScreen(from: attitude)
+
                 switch mode {
                 case .easy:
                     // Move towards a target position based on tilt
                     // Easier fine-tuning when close to the movement target
-                    // Pitch = Forward/Back, Roll = Left/Right
-                    let targetX = (screenSize.width / 2) + (CGFloat(attitude.roll) * sensitivity * 20)
-                    let targetY = (screenSize.height / 2) + (CGFloat(attitude.pitch) * sensitivity * 20)
+                    let targetX = (screenSize.width / 2) + (tilt.x * sensitivity * 20)
+                    let targetY = (screenSize.height / 2) + (tilt.y * sensitivity * 20)
                     
                     withAnimation(.interactiveSpring()) {
                         catPosition.x += (targetX - catPosition.x) * damping
@@ -245,9 +302,8 @@ struct ContentView: View {
                     
                 case .difficult:
                     // Velocity-based movement: more direct response to tilt
-                    // Pitch = Forward/Back, Roll = Left/Right
-                    let velocityX = CGFloat(attitude.roll) * sensitivity * 8
-                    let velocityY = CGFloat(attitude.pitch) * sensitivity * 8
+                    let velocityX = tilt.x * sensitivity * 8
+                    let velocityY = tilt.y * sensitivity * 8
                     
                     // Apply damping to velocity for smooth movement
                     let dampedVelocityX = velocityX * damping
