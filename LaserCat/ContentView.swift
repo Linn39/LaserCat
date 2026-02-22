@@ -306,7 +306,7 @@ struct ContentView: View {
 
             let now = Date()
             if let lastMove = lastSignificantMovementDate,
-               now.timeIntervalSince(lastMove) <= 10 {
+               now.timeIntervalSince(lastMove) <= 5 {  // Enable screen lock timer after 5 s
                 UIApplication.shared.isIdleTimerDisabled = true
             } else {
                 UIApplication.shared.isIdleTimerDisabled = false
