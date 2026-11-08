@@ -35,6 +35,10 @@ struct ContentView: View {
     @State private var gameStartDate: Date?
     @State private var gameEndDeadline: Date?
     @State private var gameOver = false
+    @State private var lives = 3
+    @State private var invulnerableUntil: Date?
+    @State private var bombFlashTrigger = 0
+    @State private var bombFlashOpacity = 0.0
     @State private var bombSpawnElapsedThresholds: [TimeInterval] = []
     @State private var bombSpawnsApplied: Int = 0
     @State private var bombPosition: CGPoint?
@@ -51,6 +55,8 @@ struct ContentView: View {
     /// Initial countdown and bar scale; extra time from hits shows as a full bar until remaining drops below this.
     let roundTimeSeconds: TimeInterval = 20
     let bonusSecondsPerHit: TimeInterval = 0.5
+    let maxLives = 3
+    let invulnerabilitySeconds: TimeInterval = 1.5
 
     /// Idle timer: gyro magnitude (rad/s) above this = "significant movement". Still device ≈ 0; moving the board gives 0.1–1+.
     let movementThresholdGyro: Double = 0.05
@@ -145,6 +151,16 @@ struct ContentView: View {
                             }
 
                             Spacer()
+
+                            HStack(spacing: 6) {
+                                ForEach(0..<maxLives, id: \.self) { index in
+                                    Image(index < lives ? "pixel_heart_red" : "pixel_heart_gray")
+                                        .resizable()
+                                        .interpolation(.none)
+                                        .frame(width: 28, height: 28)
+                                }
+                            }
+                            .accessibilityLabel("Lives: \(lives) of \(maxLives)")
                         }
                         .padding([.top, .horizontal], 16)
 
@@ -226,6 +242,34 @@ struct ContentView: View {
                         .padding(.bottom, 24)
                     }
                 }
+
+                Color.white
+                    .opacity(bombFlashOpacity)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+            }
+            .task(id: bombFlashTrigger) {
+                guard bombFlashTrigger > 0 else { return }
+                for _ in 0..<3 {
+                    withAnimation(.easeOut(duration: 0.06)) {
+                        bombFlashOpacity = 0.4
+                    }
+                    do {
+                        try await Task.sleep(nanoseconds: 120_000_000)
+                    } catch {
+                        bombFlashOpacity = 0
+                        return
+                    }
+                    withAnimation(.easeOut(duration: 0.08)) {
+                        bombFlashOpacity = 0
+                    }
+                    do {
+                        try await Task.sleep(nanoseconds: 100_000_000)
+                    } catch {
+                        bombFlashOpacity = 0
+                        return
+                    }
+                }
             }
             .onAppear {
                 // Cache screen size for later use when selecting mode
@@ -298,6 +342,10 @@ struct ContentView: View {
         totalHitInterval = 0
         lastSignificantMovementDate = Date()
         gameOver = false
+        lives = maxLives
+        invulnerableUntil = nil
+        bombFlashTrigger = 0
+        bombFlashOpacity = 0
         let start = Date()
         gameStartDate = start
         gameEndDeadline = start.addingTimeInterval(roundTimeSeconds)
@@ -392,13 +440,20 @@ struct ContentView: View {
                 }
 
                 // Bomb hit: same rule shape as laser (cat radius + half of target radius)
-                if let bomb = bombPosition {
+                if let bomb = bombPosition, Date() >= (invulnerableUntil ?? .distantPast) {
                     let bdx = catPosition.x - bomb.x
                     let bdy = catPosition.y - bomb.y
                     let bombDist = sqrt(bdx * bdx + bdy * bdy)
                     let bombHitThreshold = (catSize / 2) + (catSize / 2) * 0.5
                     if bombDist < bombHitThreshold {
-                        endGameSession(resetToMenu: false)
+                        bombPosition = nil
+                        lives -= 1
+                        bombFlashTrigger += 1
+                        if lives == 0 {
+                            endGameSession(resetToMenu: false)
+                        } else {
+                            invulnerableUntil = Date().addingTimeInterval(invulnerabilitySeconds)
+                        }
                         return
                     }
                 }
@@ -540,6 +595,8 @@ struct ContentView: View {
         if resetToMenu {
             gameOver = false
             movementMode = nil
+            bombFlashTrigger = 0
+            bombFlashOpacity = 0
         } else {
             gameOver = true
         }
