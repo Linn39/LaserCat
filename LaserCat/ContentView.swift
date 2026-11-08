@@ -175,8 +175,8 @@ struct ContentView: View {
                                 .frame(width: laserRadius * 2, height: laserRadius * 2)
                                 .position(laserPosition)
 
-                            // The Cat Face from asset catalog
-                            Image("cat_face")
+                            // The cat face with a transparent background
+                            Image("cat_face_no_background")
                                 .resizable()
                                 .scaledToFit()
                                 .frame(width: catSize, height: catSize)
