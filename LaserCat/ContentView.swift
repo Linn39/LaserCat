@@ -54,7 +54,7 @@ struct ContentView: View {
     let catSize: CGFloat = 60.0
     /// Initial countdown and bar scale; extra time from hits shows as a full bar until remaining drops below this.
     let roundTimeSeconds: TimeInterval = 20
-    let bonusSecondsPerHit: TimeInterval = 0.5
+    let bonusSecondsPerHit: TimeInterval = 2
     let maxLives = 3
     let invulnerabilitySeconds: TimeInterval = 1.5
 
