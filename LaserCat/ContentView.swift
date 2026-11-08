@@ -37,6 +37,9 @@ struct ContentView: View {
     @State private var gameOver = false
     @State private var lives = 3
     @State private var invulnerableUntil: Date?
+    @State private var isBlinking = false
+    @State private var blinkStartedAt: Date?
+    @State private var laserResetAt: Date?
     @State private var bombFlashTrigger = 0
     @State private var bombFlashOpacity = 0.0
     @State private var bombSpawnElapsedThresholds: [TimeInterval] = []
@@ -257,7 +260,7 @@ struct ContentView: View {
                     do {
                         try await Task.sleep(nanoseconds: 120_000_000)
                     } catch {
-                        bombFlashOpacity = 0
+                        finishBombFlash()
                         return
                     }
                     withAnimation(.easeOut(duration: 0.08)) {
@@ -266,10 +269,11 @@ struct ContentView: View {
                     do {
                         try await Task.sleep(nanoseconds: 100_000_000)
                     } catch {
-                        bombFlashOpacity = 0
+                        finishBombFlash()
                         return
                     }
                 }
+                finishBombFlash()
             }
             .onAppear {
                 // Cache screen size for later use when selecting mode
@@ -344,6 +348,9 @@ struct ContentView: View {
         gameOver = false
         lives = maxLives
         invulnerableUntil = nil
+        isBlinking = false
+        blinkStartedAt = nil
+        laserResetAt = nil
         bombFlashTrigger = 0
         bombFlashOpacity = 0
         let start = Date()
@@ -370,12 +377,18 @@ struct ContentView: View {
         if motion.isDeviceMotionAvailable {
             motion.deviceMotionUpdateInterval = 1/60
             motion.startDeviceMotionUpdates(to: .main) { data, _ in
-                guard !gameOver else { return }
+                guard !gameOver, !isBlinking else { return }
                 if let end = gameEndDeadline, Date() >= end {
                     endGameSession(resetToMenu: false)
                     return
                 }
                 guard let attitude = data?.attitude else { return }
+                if let resetAt = laserResetAt, Date() >= resetAt {
+                    laserColor = .red
+                    laserPosition = randomLaserPosition(in: screenSize)
+                    isLaserHit = false
+                    laserResetAt = nil
+                }
 
                 let tilt = tiltForScreen(from: attitude)
 
@@ -386,15 +399,13 @@ struct ContentView: View {
                     let targetX = (screenSize.width / 2) + (tilt.x * sensitivity * 20)
                     let targetY = (screenSize.height / 2) + (tilt.y * sensitivity * 20)
                     
-                    withAnimation(.interactiveSpring()) {
-                        catPosition.x += (targetX - catPosition.x) * damping
-                        catPosition.y += (targetY - catPosition.y) * damping
-                        
-                        // Keep the cat on screen (using a fixed margin similar to original)
-                        let margin: CGFloat = 25
-                        catPosition.x = min(max(catPosition.x, margin), screenSize.width - margin)
-                        catPosition.y = min(max(catPosition.y, margin), screenSize.height - margin)
-                    }
+                    catPosition.x += (targetX - catPosition.x) * damping
+                    catPosition.y += (targetY - catPosition.y) * damping
+
+                    // Keep the cat on screen (using a fixed margin similar to original)
+                    let margin: CGFloat = 25
+                    catPosition.x = min(max(catPosition.x, margin), screenSize.width - margin)
+                    catPosition.y = min(max(catPosition.y, margin), screenSize.height - margin)
                     
                 case .difficult:
                     // Velocity-based movement: more direct response to tilt
@@ -414,10 +425,8 @@ struct ContentView: View {
                     let clampedX = min(max(newX, margin), screenSize.width - margin)
                     let clampedY = min(max(newY, margin), screenSize.height - margin)
                     
-                    withAnimation(.interactiveSpring()) {
-                        catPosition.x = clampedX
-                        catPosition.y = clampedY
-                    }
+                    catPosition.x = clampedX
+                    catPosition.y = clampedY
                 }
 
                 // Track significant movement by gyro (rotation rate), not tilt — phone can be tilted but still
@@ -448,6 +457,8 @@ struct ContentView: View {
                     if bombDist < bombHitThreshold {
                         bombPosition = nil
                         lives -= 1
+                        isBlinking = true
+                        blinkStartedAt = Date()
                         bombFlashTrigger += 1
                         if lives == 0 {
                             endGameSession(resetToMenu: false)
@@ -467,7 +478,7 @@ struct ContentView: View {
                 let hitThreshold = (catSize / 2) + laserRadius * 0.5
 
                 if distance < hitThreshold && !isLaserHit {
-                    handleLaserHit(screenSize: screenSize)
+                    handleLaserHit()
                 }
             }
         }
@@ -479,6 +490,10 @@ struct ContentView: View {
     private func startIdleTimer() {
         idleTimer?.invalidate()
         idleTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            if isBlinking {
+                UIApplication.shared.isIdleTimerDisabled = true
+                return
+            }
             guard movementMode != nil else {
                 UIApplication.shared.isIdleTimerDisabled = false
                 return
@@ -497,7 +512,7 @@ struct ContentView: View {
     #endif
 
     // When the cat reaches the laser: flash green, then teleport
-    private func handleLaserHit(screenSize: CGSize) {
+    private func handleLaserHit() {
         guard !gameOver, let end = gameEndDeadline else { return }
         gameEndDeadline = end.addingTimeInterval(bonusSecondsPerHit)
         isLaserHit = true
@@ -519,15 +534,28 @@ struct ContentView: View {
         }
         lastHitDate = now
 
-        // After 0.5 seconds, reset color and move to new random location
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            laserColor = .red
-            laserPosition = randomLaserPosition(in: screenSize)
-            isLaserHit = false
+        // Process this in the game loop so a life-loss blink also pauses the delay.
+        laserResetAt = now.addingTimeInterval(0.5)
+    }
+
+    private func finishBombFlash() {
+        bombFlashOpacity = 0
+        guard isBlinking, let startedAt = blinkStartedAt else { return }
+        let pausedFor = Date().timeIntervalSince(startedAt)
+        if let deadline = gameEndDeadline { gameEndDeadline = deadline.addingTimeInterval(pausedFor) }
+        if let start = gameStartDate { gameStartDate = start.addingTimeInterval(pausedFor) }
+        if let hit = lastHitDate { lastHitDate = hit.addingTimeInterval(pausedFor) }
+        if let until = invulnerableUntil { invulnerableUntil = until.addingTimeInterval(pausedFor) }
+        if let reset = laserResetAt { laserResetAt = reset.addingTimeInterval(pausedFor) }
+        if let movement = lastSignificantMovementDate {
+            lastSignificantMovementDate = movement.addingTimeInterval(pausedFor)
         }
+        blinkStartedAt = nil
+        isBlinking = false
     }
 
     /// Use .playback so game sound is controlled only by the in-app toggle, not the phone silent switch.
+
     private func configureAudioSession() {
         #if os(iOS)
         do {
@@ -589,6 +617,9 @@ struct ContentView: View {
         motion.stopDeviceMotionUpdates()
         gameEndDeadline = nil
         gameStartDate = nil
+        laserResetAt = nil
+        blinkStartedAt = nil
+        isBlinking = false
         bombPosition = nil
         bombSpawnElapsedThresholds = []
         bombSpawnsApplied = 0
@@ -611,7 +642,8 @@ struct ContentView: View {
         Group {
             if let end = gameEndDeadline {
                 TimelineView(.periodic(from: .now, by: 0.05)) { context in
-                    let remaining = max(0, end.timeIntervalSince(context.date))
+                    let displayTime = blinkStartedAt ?? context.date
+                    let remaining = max(0, end.timeIntervalSince(displayTime))
                     let fill = min(1.0, remaining / roundTimeSeconds)
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
