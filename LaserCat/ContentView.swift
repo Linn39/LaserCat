@@ -58,6 +58,8 @@ struct ContentView: View {
     /// Initial countdown and bar scale; extra time from hits shows as a full bar until remaining drops below this.
     let roundTimeSeconds: TimeInterval = 20
     let bonusSecondsPerHit: TimeInterval = 2
+    /// Minimum center-to-center distance between a bomb and the active laser target.
+    let bombLaserMinimumDistance: CGFloat = 120.0
     let maxLives = 3
     let invulnerabilitySeconds: TimeInterval = 1.5
 
@@ -440,7 +442,7 @@ struct ContentView: View {
                     let elapsed = Date().timeIntervalSince(start)
                     while bombSpawnsApplied < bombSpawnElapsedThresholds.count,
                           elapsed >= bombSpawnElapsedThresholds[bombSpawnsApplied] {
-                        bombPosition = randomLaserPosition(in: screenSize)
+                        bombPosition = randomBombPosition(in: screenSize, awayFrom: laserPosition)
                         bombSpawnsApplied += 1
                     }
                 }
@@ -584,6 +586,35 @@ struct ContentView: View {
         let y = CGFloat.random(in: yRange)
 
         return CGPoint(x: x, y: y)
+    }
+
+    /// Generate a bomb position that stays away from the active laser target.
+    /// If the available space is too constrained, use the farthest sampled position.
+    private func randomBombPosition(in size: CGSize, awayFrom laser: CGPoint) -> CGPoint {
+        let extraPadding: CGFloat = catSize
+        let margin = laserRadius + 10 + extraPadding
+        let xRange = margin...(size.width - margin)
+        let yRange = margin...(size.height - margin)
+
+        var farthestPosition = CGPoint(x: CGFloat.random(in: xRange), y: CGFloat.random(in: yRange))
+        var farthestDistance: CGFloat = 0
+
+        for _ in 0..<50 {
+            let candidate = CGPoint(x: CGFloat.random(in: xRange), y: CGFloat.random(in: yRange))
+            let dx = candidate.x - laser.x
+            let dy = candidate.y - laser.y
+            let distance = sqrt(dx * dx + dy * dy)
+
+            if distance >= bombLaserMinimumDistance {
+                return candidate
+            }
+            if distance > farthestDistance {
+                farthestDistance = distance
+                farthestPosition = candidate
+            }
+        }
+
+        return farthestPosition
     }
 
     /// Sorted elapsed times (seconds from round start) when a bomb appears, each at a new random location.
