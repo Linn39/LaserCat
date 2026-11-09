@@ -169,7 +169,7 @@ struct ContentView: View {
                         }
                         .padding([.top, .horizontal], 16)
 
-                        if !gameOver, gameEndDeadline != nil {
+                        if !gameOver {
                             timeRemainingBar
                                 .padding(.horizontal, 16)
                                 .padding(.top, 8)
@@ -687,24 +687,22 @@ struct ContentView: View {
     }
 
     private var timeRemainingBar: some View {
-        Group {
-            if let end = gameEndDeadline {
-                TimelineView(.periodic(from: .now, by: 0.05)) { context in
-                    let displayTime = blinkStartedAt ?? context.date
-                    let remaining = max(0, end.timeIntervalSince(displayTime))
-                    let fill = min(1.0, remaining / roundTimeSeconds)
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule()
-                                .fill(Color.white.opacity(0.2))
-                            Capsule()
-                                .fill(Color.orange.opacity(0.95))
-                                .frame(width: max(0, geo.size.width * CGFloat(fill)))
-                        }
-                    }
-                    .frame(height: 8)
+        TimelineView(.periodic(from: .now, by: 0.05)) { context in
+            let displayTime = blinkStartedAt ?? context.date
+            let remaining = gameEndDeadline.map {
+                max(0, $0.timeIntervalSince(displayTime))
+            } ?? roundTimeSeconds
+            let fill = min(1.0, remaining / roundTimeSeconds)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.white.opacity(0.2))
+                    Capsule()
+                        .fill(Color.orange.opacity(0.95))
+                        .frame(width: max(0, geo.size.width * CGFloat(fill)))
                 }
+            }
+            .frame(height: 8)
             }
         }
     }
-}
