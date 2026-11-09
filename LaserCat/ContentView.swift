@@ -51,7 +51,7 @@ struct ContentView: View {
     #endif
     
     // 2. Sensitivity Settings (Adjust these for your balance board!)
-    let sensitivity: CGFloat = 50.0
+    let sensitivity: CGFloat = 75.0
     let damping: CGFloat = 0.15 // Lower = smoother/slower, Higher = twitchier
     let laserRadius: CGFloat = 25.0
     let catSize: CGFloat = 60.0
