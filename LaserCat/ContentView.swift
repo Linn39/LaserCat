@@ -222,6 +222,9 @@ struct ContentView: View {
                                     Text("Total hits: \(hitCount)")
                                         .font(.title.bold())
                                         .foregroundColor(.white)
+                                    Text("Tap screen to play again")
+                                        .font(.footnote)
+                                        .foregroundColor(.white.opacity(0.8))
                                 }
                                 .padding(28)
                                 .background(Color.black.opacity(0.75))
@@ -229,6 +232,11 @@ struct ContentView: View {
                             }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            guard gameOver else { return }
+                            restartCurrentGame()
+                        }
 
                         // Score HUD at bottom
                         VStack(spacing: 4) {
@@ -370,6 +378,11 @@ struct ContentView: View {
         startIdleTimer()
         UIApplication.shared.isIdleTimerDisabled = true
         #endif
+    }
+
+    private func restartCurrentGame() {
+        guard let mode = movementMode else { return }
+        selectMode(mode, screenSize: screenSize)
     }
     
     func startMotionUpdates(screenSize: CGSize, mode: MovementMode) {
