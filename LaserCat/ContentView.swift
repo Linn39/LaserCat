@@ -353,9 +353,6 @@ struct ContentView: View {
         laserResetAt = nil
         bombFlashTrigger = 0
         bombFlashOpacity = 0
-        let start = Date()
-        gameStartDate = start
-        gameEndDeadline = start.addingTimeInterval(roundTimeSeconds)
         bombSpawnElapsedThresholds = Self.randomBombSpawnOffsets(
             count: 3,
             minElapsed: 5,
@@ -513,7 +510,15 @@ struct ContentView: View {
 
     // When the cat reaches the laser: flash green, then teleport
     private func handleLaserHit() {
-        guard !gameOver, let end = gameEndDeadline else { return }
+        guard !gameOver else { return }
+
+        let now = Date()
+        if gameStartDate == nil {
+            gameStartDate = now
+            gameEndDeadline = now.addingTimeInterval(roundTimeSeconds)
+        }
+
+        guard let end = gameEndDeadline else { return }
         gameEndDeadline = end.addingTimeInterval(bonusSecondsPerHit)
         isLaserHit = true
         laserColor = .green
@@ -523,7 +528,6 @@ struct ContentView: View {
         }
 
         // Update score and timing
-        let now = Date()
         if let last = lastHitDate {
             let interval = now.timeIntervalSince(last)
             totalHitInterval += interval
